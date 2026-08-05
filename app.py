@@ -16,7 +16,7 @@ if not api_key:
     st.stop()
 
 genai.configure(api_key=api_key)
-model = genai.GenerativeModel("gemini-1.5-flash")
+model = genai.GenerativeModel("gemini-flash-latest")
 
 # Upload section
 uploaded_file = st.file_uploader("Upload a photo", type=["jpg", "jpeg", "png", "webp"])
