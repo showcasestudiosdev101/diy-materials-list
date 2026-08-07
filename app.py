@@ -3,6 +3,47 @@ import google.generativeai as genai
 from PIL import Image
 import os
 
+import streamlit as st
+
+# --- Password Protection ---
+def check_password():
+    """Returns True if the user entered the correct password."""
+    def password_entered():
+        if st.session_state["password"] == st.secrets["password"]:
+            st.session_state["password_correct"] = True
+            del st.session_state["password"]  # Don't store the password
+        else:
+            st.session_state["password_correct"] = False
+
+    if "password_correct" not in st.session_state:
+        # First run → show input box
+        st.text_input(
+            "Enter password to access the app",
+            type="password",
+            on_change=password_entered,
+            key="password"
+        )
+        return False
+
+    elif not st.session_state["password_correct"]:
+        # Wrong password
+        st.text_input(
+            "Enter password to access the app",
+            type="password",
+            on_change=password_entered,
+            key="password"
+        )
+        st.error("Incorrect password")
+        return False
+
+    else:
+        # Correct password
+        return True
+
+if not check_password():
+    st.stop()  # Stop the app if password is wrong
+# --- End Password Protection ---
+
 st.set_page_config(page_title="DIY Photo → Materials List", page_icon="🛠️")
 
 st.title("🛠️ DIY Photo → Materials & Supplies List")
