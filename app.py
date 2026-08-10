@@ -1,108 +1,179 @@
 import streamlit as st
 import google.generativeai as genai
 from PIL import Image
+from fpdf import FPDF
+from datetime import datetime
+import io
 import os
 
-import streamlit as st
+st.set_page_config(
+    page_title="Showcase Studios Bid and Build",
+    page_icon="🛠️",
+    layout="wide"
+)
 
-# --- Password Protection ---
-def check_password():
-    """Returns True if the user entered the correct password."""
-    def password_entered():
-        if st.session_state["password"] == st.secrets["password"]:
-            st.session_state["password_correct"] = True
-            del st.session_state["password"]  # Don't store the password
-        else:
-            st.session_state["password_correct"] = False
+st.title("🛠️ Showcase Studios Bid and Build App")
+st.caption("Photo → Materials List + Professional Bid PDF")
 
-    if "password_correct" not in st.session_state:
-        # First run → show input box
-        st.text_input(
-            "Enter password to access the app",
-            type="password",
-            on_change=password_entered,
-            key="password"
-        )
-        return False
-
-    elif not st.session_state["password_correct"]:
-        # Wrong password
-        st.text_input(
-            "Enter password to access the app",
-            type="password",
-            on_change=password_entered,
-            key="password"
-        )
-        st.error("Incorrect password")
-        return False
-
-    else:
-        # Correct password
-        return True
-
-if not check_password():
-    st.stop()  # Stop the app if password is wrong
-# --- End Password Protection ---
-
-st.set_page_config(page_title="DIY Photo → Materials List", page_icon="🛠️")
-
-st.title("🛠️ DIY Photo → Materials & Supplies List")
-st.write("Upload a photo of a deck, fence, or any DIY project and get a materials list.")
-
-# Get API key from Streamlit secrets
+# --- API Key ---
 api_key = st.secrets.get("GEMINI_API_KEY", None)
-
 if not api_key:
-    st.error("Missing Gemini API key. Please add it in Streamlit secrets.")
+    st.error("Missing Gemini API key in Streamlit Secrets.")
     st.stop()
 
 genai.configure(api_key=api_key)
-model = genai.GenerativeModel("gemini-flash-latest")
+model = genai.GenerativeModel("gemini-1.5-flash")
 
-# Upload section
-uploaded_file = st.file_uploader("Upload a photo", type=["jpg", "jpeg", "png", "webp"])
-notes = st.text_area("Optional notes (example: replace deck boards and railing)", height=100)
+# --- Session state for clearing ---
+if "photos" not in st.session_state:
+    st.session_state.photos = []
 
-if st.button("Generate Materials List", type="primary"):
-    if uploaded_file is None:
-        st.warning("Please upload a photo first.")
+# --- Inputs ---
+col1, col2 = st.columns([2, 1])
+
+with col1:
+    project_type = st.selectbox(
+        "Project Type",
+        ["Deck", "Fence", "Roof / Roofing", "Stairs / Steps", "Room Painting", "Other / General"]
+    )
+
+with col2:
+    st.write("")  # spacing
+    if st.button("Clear All Photos"):
+        st.session_state.photos = []
+        st.rerun()
+
+dimensions = st.text_input(
+    "Dimensions / Measurements (highly recommended)",
+    placeholder="Example: 12 ft x 16 ft deck, 8 ft high fence, 10x12 room, etc."
+)
+
+notes = st.text_area(
+    "Additional notes or special requests",
+    placeholder="Example: Prefer pressure-treated lumber, replace only the top boards, focus on structural issues, etc.",
+    height=90
+)
+
+uploaded_files = st.file_uploader(
+    "Upload photos (multiple angles strongly recommended)",
+    type=["jpg", "jpeg", "png", "webp"],
+    accept_multiple_files=True
+)
+
+if uploaded_files:
+    st.session_state.photos = uploaded_files
+
+# Show current photos
+if st.session_state.photos:
+    st.write(f"**{len(st.session_state.photos)} photo(s) ready**")
+    cols = st.columns(min(4, len(st.session_state.photos)))
+    for idx, file in enumerate(st.session_state.photos):
+        with cols[idx % 4]:
+            st.image(file, caption=f"Photo {idx+1}", use_container_width=True)
+
+# --- Generate ---
+if st.button("Generate Materials List & Bid", type="primary"):
+    if not st.session_state.photos:
+        st.warning("Please upload at least one photo.")
     else:
-        image = Image.open(uploaded_file)
-        st.image(image, caption="Your photo", use_container_width=True)
+        images = [Image.open(f) for f in st.session_state.photos]
 
         prompt = f"""
-You are an experienced DIY and outdoor construction advisor.
+You are a practical, experienced construction and DIY estimator working for Showcase Studios.
 
-Analyze the uploaded photo carefully. The user wants a materials and supplies list.
+Project Type: {project_type}
+Dimensions provided by user: {dimensions if dimensions else "None given – estimate carefully from photos"}
+User notes: {notes if notes else "None"}
 
-User notes: {notes if notes else "No extra notes provided."}
+You have been given {len(images)} photo(s). Use ALL of them.
 
-Provide a clear, practical response in this exact format:
+Create a realistic, conservative materials and supplies list. 
+Do NOT invent precise board counts if the photos + dimensions are insufficient — clearly state assumptions.
+Prefer common, readily available materials.
+
+Respond in this exact structure:
 
 **Project Assessment**
-- Brief description of what you see
-- Recommended approach (repair / partial rebuild / full rebuild / refinishing, etc.)
+- What the photos show
+- Recommended approach (repair / partial rebuild / full rebuild / refinish / paint, etc.)
+- Key assumptions you are making
 
 **Materials & Supplies List**
-- List items with approximate quantities
-- Group by category if helpful (lumber, fasteners, finish, etc.)
+- Grouped by category
+- Approximate quantities (or ranges when uncertain)
+- Notes on any items that need verification on-site
 
 **Tools Needed**
-- List the main tools required
+- Main tools required
 
-**Basic Steps**
+**Suggested Work Sequence**
 - Numbered high-level steps
 
-**Difficulty & Time Estimate**
-- Difficulty (Beginner / Intermediate / Advanced)
-- Rough time estimate
+**Difficulty & Rough Time**
+- Difficulty level
+- Estimated time range
 
-Be realistic and practical. Prefer common, readily available materials.
+Be honest about limitations. Accuracy is more important than sounding complete.
 """
 
-        with st.spinner("Analyzing photo..."):
+        with st.spinner("Analyzing photos and creating materials list..."):
             try:
-                response = model.generate_content([prompt, image])
-                st.markdown(response.text)
+                response = model.generate_content([prompt] + images)
+                result_text = response.text
+                st.markdown("---")
+                st.markdown(result_text)
+
+                # --- PDF Generation ---
+                class PDF(FPDF):
+                    def header(self):
+                        self.set_font("Helvetica", "B", 16)
+                        self.cell(0, 10, "Showcase Studios", ln=True, align="C")
+                        self.set_font("Helvetica", "", 11)
+                        self.cell(0, 8, "Bid and Build App", ln=True, align="C")
+                        self.ln(4)
+                        self.set_draw_color(80, 80, 80)
+                        self.line(10, self.get_y(), 200, self.get_y())
+                        self.ln(8)
+
+                    def footer(self):
+                        self.set_y(-15)
+                        self.set_font("Helvetica", "I", 8)
+                        self.cell(0, 10, f"Generated {datetime.now().strftime('%Y-%m-%d %H:%M')}  |  Page {self.page_no()}", align="C")
+
+                pdf = PDF()
+                pdf.set_auto_page_break(auto=True, margin=15)
+                pdf.add_page()
+                pdf.set_font("Helvetica", "", 11)
+
+                # Add project info
+                pdf.set_font("Helvetica", "B", 12)
+                pdf.cell(0, 8, f"Project Type: {project_type}", ln=True)
+                if dimensions:
+                    pdf.cell(0, 8, f"Dimensions: {dimensions}", ln=True)
+                pdf.ln(4)
+
+                # Add the AI response (simple text handling)
+                pdf.set_font("Helvetica", "", 10)
+                for line in result_text.split("\n"):
+                    # Basic cleaning for PDF
+                    clean = line.replace("**", "").replace("*", "").strip()
+                    if clean:
+                        pdf.multi_cell(0, 6, clean)
+                    else:
+                        pdf.ln(3)
+
+                pdf.ln(8)
+                pdf.set_font("Helvetica", "I", 9)
+                pdf.multi_cell(0, 5, "Disclaimer: This is an AI-assisted estimate based on the photos and information provided. Final quantities, structural decisions, and costs should be verified by a qualified professional. Showcase Studios is not responsible for construction outcomes.")
+
+                # Create download
+                pdf_bytes = pdf.output()
+                st.download_button(
+                    label="📄 Download PDF Bid",
+                    data=pdf_bytes,
+                    file_name=f"Showcase_Studios_Bid_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf",
+                    mime="application/pdf"
+                )
+
             except Exception as e:
                 st.error(f"Error: {str(e)}")
