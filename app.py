@@ -123,15 +123,16 @@ Be honest about limitations. Accuracy is more important than sounding complete.
                 st.markdown("---")
                 st.markdown(result_text)
 
-                # --- PDF Generation ---
+                # --- PDF Generations ---
+                # --- Improved PDF Generation ---
                 class PDF(FPDF):
                     def header(self):
                         self.set_font("Helvetica", "B", 16)
                         self.cell(0, 10, "Showcase Studios", ln=True, align="C")
                         self.set_font("Helvetica", "", 11)
                         self.cell(0, 8, "Bid and Build App", ln=True, align="C")
-                        self.ln(4)
-                        self.set_draw_color(80, 80, 80)
+                        self.ln(3)
+                        self.set_draw_color(100, 100, 100)
                         self.line(10, self.get_y(), 200, self.get_y())
                         self.ln(8)
 
@@ -141,32 +142,44 @@ Be honest about limitations. Accuracy is more important than sounding complete.
                         self.cell(0, 10, f"Generated {datetime.now().strftime('%Y-%m-%d %H:%M')}  |  Page {self.page_no()}", align="C")
 
                 pdf = PDF()
-                pdf.set_auto_page_break(auto=True, margin=15)
+                pdf.set_auto_page_break(auto=True, margin=18)
+                pdf.set_margins(left=12, top=15, right=12)
                 pdf.add_page()
-                pdf.set_font("Helvetica", "", 11)
+                pdf.set_font("Helvetica", "", 10)
 
-                # Add project info
+                # Project info
                 pdf.set_font("Helvetica", "B", 12)
-                pdf.cell(0, 8, f"Project Type: {project_type}", ln=True)
+                pdf.multi_cell(0, 7, f"Project Type: {project_type}")
                 if dimensions:
-                    pdf.cell(0, 8, f"Dimensions: {dimensions}", ln=True)
+                    pdf.multi_cell(0, 7, f"Dimensions: {dimensions}")
                 pdf.ln(4)
 
-                # Add the AI response (simple text handling)
+                # Clean and write the AI response
                 pdf.set_font("Helvetica", "", 10)
+                
                 for line in result_text.split("\n"):
-                    # Basic cleaning for PDF
-                    clean = line.replace("**", "").replace("*", "").strip()
-                    if clean:
-                        pdf.multi_cell(0, 6, clean)
-                    else:
+                    clean = line.replace("**", "").replace("*", "").replace("#", "").strip()
+                    
+                    if not clean:
                         pdf.ln(3)
+                        continue
+                    
+                    # Force wrapping with explicit width
+                    try:
+                        pdf.multi_cell(w=186, h=6, text=clean, align="L")
+                    except Exception:
+                        # Fallback for problematic lines
+                        pdf.multi_cell(w=186, h=6, text=clean[:90] + "...", align="L")
 
-                pdf.ln(8)
-                pdf.set_font("Helvetica", "I", 9)
-                pdf.multi_cell(0, 5, "Disclaimer: This is an AI-assisted estimate based on the photos and information provided. Final quantities, structural decisions, and costs should be verified by a qualified professional. Showcase Studios is not responsible for construction outcomes.")
+                pdf.ln(10)
+                pdf.set_font("Helvetica", "I", 8)
+                pdf.multi_cell(0, 5, 
+                    "Disclaimer: This is an AI-assisted estimate based on the photos and information provided. "
+                    "Final quantities, structural decisions, and costs should be verified by a qualified professional. "
+                    "Showcase Studios is not responsible for construction outcomes."
+                )
 
-                # Create download
+                # Create downloadable PDF
                 pdf_bytes = pdf.output()
                 st.download_button(
                     label="📄 Download PDF Bid",
