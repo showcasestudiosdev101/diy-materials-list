@@ -1,5 +1,5 @@
 import streamlit as st
-import google.generativeai as genai
+import google.genai as genai
 from PIL import Image
 from fpdf import FPDF
 from datetime import datetime
@@ -7,12 +7,12 @@ import io
 import os
 
 st.set_page_config(
-    page_title="Showcase Studios Bid and Build",
+    page_title="Bid and Build It by Showcase Studios",
     page_icon="🛠️",
     layout="wide"
 )
 
-st.title("🛠️ Showcase Studios Bid and Build App")
+st.title("🛠️ Bid and Build App")
 st.caption("Photo → Materials List + Professional Bid PDF")
 
 # --- API Key ---
@@ -39,7 +39,7 @@ with col1:
 
 with col2:
     st.write("")  # spacing
-    if st.button("Clear All Photos"):
+    if st.button("Clear All Previous Photos?"):
         st.session_state.photos = []
         st.rerun()
 
@@ -79,7 +79,7 @@ if st.button("Generate Materials List & Bid", type="primary"):
         images = [Image.open(f) for f in st.session_state.photos]
 
         prompt = f"""
-You are a practical, experienced construction and DIY estimator working for Showcase Studios.
+You are a practical, experienced construction and DIY estimator working with an app built by Showcase Studios.
 
 Project Type: {project_type}
 Dimensions provided by user: {dimensions if dimensions else "None given – estimate carefully from photos"}
@@ -109,7 +109,7 @@ Respond in this exact structure:
 **Suggested Work Sequence**
 - Numbered high-level steps
 
-**Difficulty & Rough Time**
+**Difficulty & Rough Time Estimate for Job**
 - Difficulty level
 - Estimated time range
 
