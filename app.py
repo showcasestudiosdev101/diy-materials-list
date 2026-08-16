@@ -1,7 +1,7 @@
 import streamlit as st
-import google.genai as genai
+import google-genai as genai
 from PIL import Image
-from fpdf import FPDF
+from fpdf2 import FPDF
 from datetime import datetime
 import io
 import os
