@@ -4,9 +4,10 @@ from PIL import Image
 from fpdf import FPDF
 from datetime import datetime
 import re
+import io
 
 # ---------- VERSION ----------
-APP_VERSION = "1.2"
+APP_VERSION = "1.3"
 # ----------------------------
 
 st.set_page_config(
@@ -16,7 +17,7 @@ st.set_page_config(
 )
 
 st.title("🛠️ Bid and Build It by Showcase Studios")
-st.caption(f"Version {APP_VERSION}  •  Upload photos → Materials list + PDF bid")
+st.caption(f"Version {APP_VERSION}  •  Upload photos → Materials list + PDF bids")
 
 # --- API Key ---
 api_key = st.secrets.get("GEMINI_API_KEY", None)
@@ -126,78 +127,157 @@ Be honest. Accuracy is more important than sounding complete.
                 st.markdown("---")
                 st.markdown(result_text)
 
-                # ---------- Safer PDF Generation ----------
-                class PDF(FPDF):
-                    def header(self):
-                        self.set_font("Helvetica", "B", 14)
-                        self.cell(0, 8, "Bid and Build It by Showcase Studios", ln=True, align="C")
-                        self.set_font("Helvetica", "", 10)
-                        self.cell(0, 6, f"Version {APP_VERSION}", ln=True, align="C")
-                        self.ln(3)
-                        self.set_draw_color(100, 100, 100)
-                        self.line(15, self.get_y(), 195, self.get_y())
-                        self.ln(6)
-
-                    def footer(self):
-                        self.set_y(-12)
-                        self.set_font("Helvetica", "I", 8)
-                        self.cell(0, 8, f"Generated {datetime.now().strftime('%Y-%m-%d %H:%M')}  |  Page {self.page_no()}", align="C")
-
-                pdf = PDF()
-                pdf.set_auto_page_break(auto=True, margin=15)
-                pdf.set_left_margin(15)
-                pdf.set_right_margin(15)
-                pdf.add_page()
-
-                # Project info
-                pdf.set_font("Helvetica", "B", 11)
-                pdf.cell(0, 7, f"Project Type: {project_type}", ln=True)
-                if dimensions:
-                    pdf.cell(0, 7, f"Dimensions: {dimensions}", ln=True)
-                pdf.ln(5)
-
-                # Clean text for PDF (remove special characters)
+                # ---------- Helper: Clean text ----------
                 def clean_for_pdf(text):
                     text = text.replace("–", "-").replace("—", "-")
                     text = text.replace("“", '"').replace("”", '"')
                     text = text.replace("‘", "'").replace("’", "'")
                     text = text.replace("•", "-")
                     text = text.replace("**", "").replace("*", "").replace("#", "")
-                    # Remove any other non-ascii characters
                     text = re.sub(r'[^\x00-\x7F]+', '', text)
                     return text.strip()
 
-                pdf.set_font("Helvetica", "", 9)
+                # ---------- Create both PDFs ----------
+                def create_pdf(version="Contractor"):
+                    class PDF(FPDF):
+                        def header(self):
+                            self.set_font("Helvetica", "B", 14)
+                            self.cell(0, 7, "Bid and Build It by Showcase Studios", ln=True, align="C")
+                            self.set_font("Helvetica", "", 10)
+                            self.cell(0, 6, f"Version {APP_VERSION}  |  {version} Version", ln=True, align="C")
+                            self.ln(2)
+                            self.set_draw_color(100, 100, 100)
+                            self.line(12, self.get_y(), 198, self.get_y())
+                            self.ln(5)
 
-                for raw_line in result_text.splitlines():
-                    line = clean_for_pdf(raw_line)
+                        def footer(self):
+                            self.set_y(-12)
+                            self.set_font("Helvetica", "I", 8)
+                            self.cell(0, 8, f"Generated {datetime.now().strftime('%Y-%m-%d %H:%M')}  |  Page {self.page_no()}", align="C")
 
-                    if not line:
-                        pdf.ln(3)
-                        continue
+                    pdf = PDF()
+                    pdf.set_auto_page_break(auto=True, margin=14)
+                    pdf.set_left_margin(12)
+                    pdf.set_right_margin(12)
+                    pdf.add_page()
 
-                    # Force wrap every 85 characters
-                    while len(line) > 0:
-                        chunk = line[:85]
-                        line = line[85:]
+                    # Left text width and right photo area
+                    text_width = 125
+                    photo_x = 145
+                    photo_width = 50
+
+                    # Project info
+                    pdf.set_font("Helvetica", "B", 11)
+                    pdf.cell(text_width, 6, f"Project Type: {project_type}", ln=True)
+                    if dimensions:
+                        pdf.cell(text_width, 6, f"Dimensions: {dimensions}", ln=True)
+                    pdf.ln(3)
+
+                    # Place photos on the right (stacked)
+                    y_start = 40
+                    for i, img in enumerate(images[:4]):  # max 4 photos
                         try:
-                            pdf.cell(0, 5, chunk, ln=True)
-                        except Exception:
-                            pdf.cell(0, 5, chunk[:70] + "...", ln=True)
+                            # Save temp image
+                            img_byte_arr = io.BytesIO()
+                            img_resized = img.copy()
+                            img_resized.thumbnail((400, 400))
+                            img_resized.save(img_byte_arr, format='JPEG')
+                            img_byte_arr.seek(0)
+                            pdf.image(img_byte_arr, x=photo_x, y=y_start + (i * 55), w=photo_width)
+                        except:
+                            pass
 
-                pdf.ln(8)
-                pdf.set_font("Helvetica", "I", 8)
-                pdf.multi_cell(0, 4.5,
-                    "Disclaimer: This is an AI-assisted estimate. Final quantities and decisions should be verified by a qualified professional. Showcase Studios is not responsible for construction outcomes."
-                )
+                    # Write text content
+                    pdf.set_font("Helvetica", "", 9)
+                    pdf.set_xy(12, 55)
 
-                pdf_bytes = bytes(pdf.output())
-                st.download_button(
-                    label="📄 Download PDF Bid",
-                    data=pdf_bytes,
-                    file_name=f"Bid_and_Build_It_v{APP_VERSION}_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf",
-                    mime="application/pdf"
-                )
+                    # Decide what sections to include
+                    lines = result_text.splitlines()
+                    skip_tools = version == "Customer"
+                    skip_sequence = version == "Customer"
+                    in_tools = False
+                    in_sequence = False
+
+                    for raw_line in lines:
+                        line = clean_for_pdf(raw_line)
+
+                        if "Tools Needed" in line:
+                            in_tools = True
+                            in_sequence = False
+                            if skip_tools:
+                                continue
+                        elif "Suggested Work Sequence" in line:
+                            in_sequence = True
+                            in_tools = False
+                            if skip_sequence:
+                                continue
+                        elif "Difficulty & Rough Time" in line:
+                            in_tools = False
+                            in_sequence = False
+
+                        if skip_tools and in_tools:
+                            continue
+                        if skip_sequence and in_sequence:
+                            continue
+
+                        if not line:
+                            pdf.ln(2)
+                            continue
+
+                        # Write line with limited width
+                        while len(line) > 0:
+                            chunk = line[:78]
+                            line = line[78:]
+                            pdf.cell(text_width, 4.5, chunk, ln=True)
+
+                    # Customer Version fill-in fields
+                    if version == "Customer":
+                        pdf.ln(6)
+                        pdf.set_font("Helvetica", "B", 10)
+                        pdf.cell(0, 6, "Pricing & Agreement", ln=True)
+                        pdf.set_font("Helvetica", "", 9)
+                        pdf.ln(2)
+                        pdf.cell(0, 6, "Deposit Amount:  $ ____________________", ln=True)
+                        pdf.cell(0, 6, "Total Price:      $ ____________________", ln=True)
+                        pdf.ln(3)
+                        pdf.cell(0, 6, "Signature: _______________________________     Date: ______________", ln=True)
+                        pdf.ln(2)
+                        pdf.cell(0, 6, "Date work to begin: ____________________", ln=True)
+                        pdf.cell(0, 6, "Who purchases supplies (Customer / Contractor): ____________________", ln=True)
+
+                    # Disclaimer
+                    pdf.ln(8)
+                    pdf.set_font("Helvetica", "I", 8)
+                    if version == "Customer":
+                        disclaimer = ("All bids subject to price changes for substitute or material changes "
+                                      "or in the scope of work modifications. Deposit due before work commencement.")
+                    else:
+                        disclaimer = ("This is an AI-assisted estimate. Final quantities and decisions should be "
+                                      "verified by a qualified professional. Showcase Studios is not responsible "
+                                      "for construction outcomes.")
+                    pdf.multi_cell(text_width, 4, disclaimer)
+
+                    return bytes(pdf.output())
+
+                # Generate both PDFs
+                contractor_pdf = create_pdf("Contractor")
+                customer_pdf = create_pdf("Customer")
+
+                col_a, col_b = st.columns(2)
+                with col_a:
+                    st.download_button(
+                        label="📄 Download Contractor Version",
+                        data=contractor_pdf,
+                        file_name=f"Bid_and_Build_It_Contractor_v{APP_VERSION}_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf",
+                        mime="application/pdf"
+                    )
+                with col_b:
+                    st.download_button(
+                        label="📄 Download Customer Version",
+                        data=customer_pdf,
+                        file_name=f"Bid_and_Build_It_Customer_v{APP_VERSION}_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf",
+                        mime="application/pdf"
+                    )
 
             except Exception as e:
                 st.error(f"Error: {str(e)}")
