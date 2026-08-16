@@ -3,9 +3,10 @@ from google import genai
 from PIL import Image
 from fpdf import FPDF
 from datetime import datetime
+import re
 
 # ---------- VERSION ----------
-APP_VERSION = "1"
+APP_VERSION = "1.2"
 # ----------------------------
 
 st.set_page_config(
@@ -83,7 +84,7 @@ if st.button("Generate Materials List & Bid", type="primary"):
 You are a practical construction estimator for Showcase Studios.
 
 Project Type: {project_type}
-Dimensions: {dimensions if dimensions else "None given – estimate carefully from the photos"}
+Dimensions: {dimensions if dimensions else "None given - estimate carefully from the photos"}
 User notes: {notes if notes else "None"}
 
 You have {len(images)} photo(s). Use all of them.
@@ -155,11 +156,21 @@ Be honest. Accuracy is more important than sounding complete.
                     pdf.cell(0, 7, f"Dimensions: {dimensions}", ln=True)
                 pdf.ln(5)
 
-                # Write text safely
+                # Clean text for PDF (remove special characters)
+                def clean_for_pdf(text):
+                    text = text.replace("–", "-").replace("—", "-")
+                    text = text.replace("“", '"').replace("”", '"')
+                    text = text.replace("‘", "'").replace("’", "'")
+                    text = text.replace("•", "-")
+                    text = text.replace("**", "").replace("*", "").replace("#", "")
+                    # Remove any other non-ascii characters
+                    text = re.sub(r'[^\x00-\x7F]+', '', text)
+                    return text.strip()
+
                 pdf.set_font("Helvetica", "", 9)
 
                 for raw_line in result_text.splitlines():
-                    line = raw_line.replace("**", "").replace("*", "").replace("#", "").replace("•", "-").strip()
+                    line = clean_for_pdf(raw_line)
 
                     if not line:
                         pdf.ln(3)
