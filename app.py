@@ -41,3 +41,160 @@ with col2:
     if st.button("Clear All Photos"):
         st.session_state.photos = []
         st.rerun()
+
+dimensions = st.text_input(
+    "Dimensions / Measurements (highly recommended)",
+    placeholder="Example: 12 ft x 16 ft, 8 ft high, 10x12 room, etc."
+)
+
+notes = st.text_area(
+    "Additional notes",
+    placeholder="Example: Prefer pressure-treated lumber, replace only damaged boards, focus on leaks, etc.",
+    height=90
+)
+
+uploaded_files = st.file_uploader(
+    "Upload photos (multiple angles recommended)",
+    type=["jpg", "jpeg", "png", "webp"],
+    accept_multiple_files=True
+)
+
+if uploaded_files:
+    st.session_state.photos = uploaded_files
+
+# Show current photos
+if st.session_state.photos:
+    st.write(f"**{len(st.session_state.photos)} photo(s) selected**")
+    cols = st.columns(min(4, len(st.session_state.photos)))
+    for idx, file in enumerate(st.session_state.photos):
+        with cols[idx % 4]:
+            st.image(file, caption=f"Photo {idx+1}", use_container_width=True)
+
+# --- Generate ---
+if st.button("Generate Materials List & Bid", type="primary"):
+    if not st.session_state.photos:
+        st.warning("Please upload at least one photo.")
+    else:
+        images = [Image.open(f) for f in st.session_state.photos]
+
+        prompt = f"""
+You are a practical construction estimator for Showcase Studios.
+
+Project Type: {project_type}
+Dimensions: {dimensions if dimensions else "None given – estimate carefully from the photos"}
+User notes: {notes if notes else "None"}
+
+You have {len(images)} photo(s). Use all of them.
+
+Create a realistic materials and supplies list. Be conservative with quantities.
+Clearly state any assumptions you are making.
+
+Respond in this exact format:
+
+**Project Assessment**
+- What the photos show
+- Recommended approach
+- Key assumptions
+
+**Materials & Supplies List**
+- Grouped by category with approximate quantities
+
+**Tools Needed**
+- Main tools required
+
+**Suggested Work Sequence**
+- Numbered high-level steps
+
+**Difficulty & Rough Time**
+- Difficulty level
+- Estimated time range
+
+Be honest. Accuracy is more important than sounding complete.
+"""
+
+        with st.spinner("Analyzing photos..."):
+            try:
+                response = model.generate_content([prompt] + images)
+                result_text = response.text
+
+                st.markdown("---")
+                st.markdown(result_text)
+
+                # ---------- Robust PDF Generation ----------
+                class PDF(FPDF):
+                    def header(self):
+                        self.set_font("Helvetica", "B", 15)
+                        self.cell(0, 9, "Showcase Studios", ln=True, align="C")
+                        self.set_font("Helvetica", "", 10)
+                        self.cell(0, 7, "Bid and Build App", ln=True, align="C")
+                        self.ln(2)
+                        self.set_draw_color(120, 120, 120)
+                        self.line(15, self.get_y(), 195, self.get_y())
+                        self.ln(6)
+
+                    def footer(self):
+                        self.set_y(-12)
+                        self.set_font("Helvetica", "I", 8)
+                        self.cell(0, 8, f"Generated {datetime.now().strftime('%Y-%m-%d %H:%M')}  |  Page {self.page_no()}", align="C")
+
+                pdf = PDF()
+                pdf.set_auto_page_break(auto=True, margin=15)
+                pdf.set_margins(left=15, top=12, right=15)
+                pdf.add_page()
+                pdf.set_font("Helvetica", "", 10)
+
+                # Project info
+                pdf.set_font("Helvetica", "B", 11)
+                pdf.multi_cell(0, 6, f"Project Type: {project_type}")
+                if dimensions:
+                    pdf.multi_cell(0, 6, f"Dimensions: {dimensions}")
+                pdf.ln(4)
+
+                # Safer text writing
+                pdf.set_font("Helvetica", "", 9)
+                usable_width = 180
+
+                for line in result_text.split("\n"):
+                    clean = (line
+                             .replace("**", "")
+                             .replace("*", "")
+                             .replace("#", "")
+                             .replace("•", "-")
+                             .strip())
+
+                    if not clean:
+                        pdf.ln(2)
+                        continue
+
+                    if len(clean) > 95:
+                        parts = [clean[i:i+90] for i in range(0, len(clean), 90)]
+                        for part in parts:
+                            try:
+                                pdf.multi_cell(usable_width, 5, part)
+                            except:
+                                pdf.multi_cell(usable_width, 5, part[:80] + "...")
+                    else:
+                        try:
+                            pdf.multi_cell(usable_width, 5, clean)
+                        except:
+                            pdf.multi_cell(usable_width, 5, clean[:80] + "...")
+
+                pdf.ln(8)
+                pdf.set_font("Helvetica", "I", 8)
+                pdf.multi_cell(usable_width, 4.5,
+                    "Disclaimer: This is an AI-assisted estimate based on the photos and information provided. "
+                    "Final quantities and structural decisions should be verified by a qualified professional. "
+                    "Showcase Studios is not responsible for construction outcomes."
+                )
+
+                # Download button
+                pdf_bytes = pdf.output()
+                st.download_button(
+                    label="📄 Download PDF Bid",
+                    data=pdf_bytes,
+                    file_name=f"Showcase_Studios_Bid_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf",
+                    mime="application/pdf"
+                )
+
+            except Exception as e:
+                st.error(f"Error: {str(e)}")
