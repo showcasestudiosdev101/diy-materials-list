@@ -1,18 +1,22 @@
 import streamlit as st
-import google.generativeai as genai
+from google import genai
 from PIL import Image
 from fpdf import FPDF
 from datetime import datetime
 import os
 
+# ---------- VERSION ----------
+APP_VERSION = "1"
+# ----------------------------
+
 st.set_page_config(
-    page_title="Showcase Studios Bid and Build",
+    page_title=f"Bid and Build It by Showcase Studios v{APP_VERSION}",
     page_icon="🛠️",
     layout="wide"
 )
 
-st.title("🛠️ Showcase Studios Bid and Build App")
-st.caption("Upload photos → Get materials list + professional PDF bid")
+st.title(f"🛠️ Bid and Build It by Showcase Studios")
+st.caption(f"Version {APP_VERSION}  •  Upload photos → Materials list + PDF bid")
 
 # --- API Key ---
 api_key = st.secrets.get("GEMINI_API_KEY", None)
@@ -20,8 +24,7 @@ if not api_key:
     st.error("Missing Gemini API key. Please add it in Streamlit Secrets.")
     st.stop()
 
-genai.configure(api_key=api_key)
-model = genai.GenerativeModel("gemini-3.6-flash")
+client = genai.Client(api_key=api_key)
 
 # --- Session state ---
 if "photos" not in st.session_state:
@@ -114,7 +117,10 @@ Be honest. Accuracy is more important than sounding complete.
 
         with st.spinner("Analyzing photos..."):
             try:
-                response = model.generate_content([prompt] + images)
+                response = client.models.generate_content(
+                    model="gemini-3.6-flash",
+                    contents=[prompt] + images
+                )
                 result_text = response.text
 
                 st.markdown("---")
@@ -123,10 +129,10 @@ Be honest. Accuracy is more important than sounding complete.
                 # ---------- Robust PDF Generation ----------
                 class PDF(FPDF):
                     def header(self):
-                        self.set_font("Helvetica", "B", 15)
-                        self.cell(0, 9, "Showcase Studios", ln=True, align="C")
+                        self.set_font("Helvetica", "B", 14)
+                        self.cell(0, 8, "Bid and Build It by Showcase Studios", ln=True, align="C")
                         self.set_font("Helvetica", "", 10)
-                        self.cell(0, 7, "Bid and Build App", ln=True, align="C")
+                        self.cell(0, 6, f"Version {APP_VERSION}", ln=True, align="C")
                         self.ln(2)
                         self.set_draw_color(120, 120, 120)
                         self.line(15, self.get_y(), 195, self.get_y())
@@ -143,14 +149,12 @@ Be honest. Accuracy is more important than sounding complete.
                 pdf.add_page()
                 pdf.set_font("Helvetica", "", 10)
 
-                # Project info
                 pdf.set_font("Helvetica", "B", 11)
                 pdf.multi_cell(0, 6, f"Project Type: {project_type}")
                 if dimensions:
                     pdf.multi_cell(0, 6, f"Dimensions: {dimensions}")
                 pdf.ln(4)
 
-                # Safer text writing
                 pdf.set_font("Helvetica", "", 9)
                 usable_width = 180
 
@@ -187,12 +191,11 @@ Be honest. Accuracy is more important than sounding complete.
                     "Showcase Studios is not responsible for construction outcomes."
                 )
 
-                # Download button
                 pdf_bytes = pdf.output()
                 st.download_button(
                     label="📄 Download PDF Bid",
                     data=pdf_bytes,
-                    file_name=f"Showcase_Studios_Bid_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf",
+                    file_name=f"Bid_and_Build_It_v{APP_VERSION}_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf",
                     mime="application/pdf"
                 )
 
