@@ -7,7 +7,7 @@ import re
 import io
 
 # ---------- VERSION ----------
-APP_VERSION = "1.6"
+APP_VERSION = "1.7"
 # ----------------------------
 
 st.set_page_config(
@@ -16,7 +16,6 @@ st.set_page_config(
     layout="wide",
 )
 
-# ---------- THEME ----------
 st.markdown(
     """
 <style>
@@ -47,10 +46,6 @@ st.markdown(
     .stButton>button:hover {
         opacity: 0.9;
         transform: translateY(-1px);
-    }
-    section[data-testid="stSidebar"] {
-        background: #0b1220;
-        border-right: 1px solid #334155;
     }
     [data-testid="stFileUploader"] {
         background: #1e293b;
@@ -124,6 +119,24 @@ def clean_for_pdf(text):
     return text.strip()
 
 
+def parse_estimate(text):
+    hours = None
+    crew = None
+    hours_match = re.search(r"ESTIMATED_HOURS:\s*([0-9]+(?:\.[0-9]+)?)", text, re.I)
+    crew_match = re.search(r"SUGGESTED_CREW:\s*([0-9]+)", text, re.I)
+    if hours_match:
+        hours = float(hours_match.group(1))
+    if crew_match:
+        crew = int(crew_match.group(1))
+    return hours, crew
+
+
+def display_text(text):
+    cleaned = re.sub(r"ESTIMATED_HOURS:\s*[0-9]+(?:\.[0-9]+)?", "", text, flags=re.I)
+    cleaned = re.sub(r"SUGGESTED_CREW:\s*[0-9]+", "", cleaned, flags=re.I)
+    return cleaned.strip()
+
+
 def create_pdf(version, result_text, images, project_type, dimensions, hours_needed, crew_size, hourly_rate, total_labor):
     class PDF(FPDF):
         def header(self):
@@ -179,7 +192,7 @@ def create_pdf(version, result_text, images, project_type, dimensions, hours_nee
     pdf.set_font("Helvetica", "", 9)
     pdf.set_xy(12, 55)
 
-    lines = result_text.splitlines()
+    lines = display_text(result_text).splitlines()
     skip_tools = version == "Customer"
     skip_sequence = version == "Customer"
     in_tools = False
@@ -221,8 +234,8 @@ def create_pdf(version, result_text, images, project_type, dimensions, hours_nee
         pdf.set_font("Helvetica", "B", 11)
         pdf.cell(text_width, 6, "Labor Cost Breakdown", ln=True)
         pdf.set_font("Helvetica", "", 10)
-        pdf.cell(text_width, 5, f"Estimated hours: {hours_needed}", ln=True)
-        pdf.cell(text_width, 5, f"People available / on crew: {crew_size}", ln=True)
+        pdf.cell(text_width, 5, f"Estimated job hours: {hours_needed}", ln=True)
+        pdf.cell(text_width, 5, f"Crew size: {crew_size}", ln=True)
         pdf.cell(text_width, 5, f"Hourly rate per person: ${hourly_rate:.2f}", ln=True)
         pdf.set_font("Helvetica", "B", 11)
         pdf.cell(text_width, 6, f"Total labor cost: ${total_labor:,.2f}", ln=True)
@@ -275,55 +288,29 @@ if "photos" not in st.session_state:
     st.session_state.photos = []
 if "result_text" not in st.session_state:
     st.session_state.result_text = None
-if "contractor_pdf" not in st.session_state:
-    st.session_state.contractor_pdf = None
-if "customer_pdf" not in st.session_state:
-    st.session_state.customer_pdf = None
-if "labor_snapshot" not in st.session_state:
-    st.session_state.labor_snapshot = None
+if "pdf_images" not in st.session_state:
+    st.session_state.pdf_images = []
+if "project_snapshot" not in st.session_state:
+    st.session_state.project_snapshot = {}
+if "base_hours" not in st.session_state:
+    st.session_state.base_hours = 8.0
+if "base_crew" not in st.session_state:
+    st.session_state.base_crew = 1
 
 col1, col2 = st.columns([2, 1])
-
 with col1:
     project_type = st.selectbox(
         "Project Type",
         ["Deck", "Fence", "Roof / Roofing", "Stairs / Steps", "Room Painting", "Other / General"],
     )
-
 with col2:
     st.write("")
     if st.button("Clear All Photos"):
         st.session_state.photos = []
         st.session_state.result_text = None
-        st.session_state.contractor_pdf = None
-        st.session_state.customer_pdf = None
-        st.session_state.labor_snapshot = None
+        st.session_state.pdf_images = []
+        st.session_state.project_snapshot = {}
         st.rerun()
-
-st.markdown("### Labor settings")
-lab1, lab2, lab3 = st.columns(3)
-with lab1:
-    hourly_rate = st.number_input(
-        "Hourly rate per person ($)",
-        min_value=0.0,
-        value=25.0,
-        step=1.0,
-    )
-with lab2:
-    crew_size = st.selectbox(
-        "Crew size (people available)",
-        [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
-        index=1,
-    )
-with lab3:
-    hours_needed = st.number_input(
-        "Estimated hours for the job",
-        min_value=0.0,
-        value=8.0,
-        step=0.5,
-    )
-total_labor = hours_needed * crew_size * hourly_rate
-st.metric("Total labor cost", f"${total_labor:,.2f}")
 
 dimensions = st.text_input(
     "Dimensions / Measurements (highly recommended)",
@@ -374,8 +361,6 @@ You are a practical construction estimator for Showcase Studios.
 Project Type: {project_type}
 Dimensions: {dimensions if dimensions else "None given - estimate carefully from the photos"}
 User notes: {notes if notes else "None"}
-Crew size available: {crew_size}
-Hourly rate per person: ${hourly_rate:.2f}
 
 You have {len(images)} photo(s). Use all of them.
 
@@ -403,6 +388,10 @@ Respond in this exact format:
 - Estimated time range
 - Suggested crew size for this job
 
+After the sections above, add these two lines exactly so the app can calculate labor:
+ESTIMATED_HOURS: <one number = total clock hours for the suggested crew, e.g. 16>
+SUGGESTED_CREW: <one whole number of people required, e.g. 2>
+
 Be honest. Accuracy is more important than sounding complete.
 """
 
@@ -413,68 +402,95 @@ Be honest. Accuracy is more important than sounding complete.
                     contents=[prompt] + images,
                 )
                 result_text = response.text
-
-                contractor_pdf = create_pdf(
-                    "Contractor",
-                    result_text,
-                    images,
-                    project_type,
-                    dimensions,
-                    hours_needed,
-                    crew_size,
-                    hourly_rate,
-                    total_labor,
-                )
-                customer_pdf = create_pdf(
-                    "Customer",
-                    result_text,
-                    images,
-                    project_type,
-                    dimensions,
-                    hours_needed,
-                    crew_size,
-                    hourly_rate,
-                    total_labor,
-                )
+                parsed_hours, parsed_crew = parse_estimate(result_text)
 
                 st.session_state.result_text = result_text
-                st.session_state.contractor_pdf = contractor_pdf
-                st.session_state.customer_pdf = customer_pdf
-                st.session_state.labor_snapshot = {
-                    "hours_needed": hours_needed,
-                    "crew_size": crew_size,
-                    "hourly_rate": hourly_rate,
-                    "total_labor": total_labor,
+                st.session_state.pdf_images = images
+                st.session_state.project_snapshot = {
+                    "project_type": project_type,
+                    "dimensions": dimensions,
                 }
+                st.session_state.base_hours = parsed_hours if parsed_hours and parsed_hours > 0 else 8.0
+                st.session_state.base_crew = parsed_crew if parsed_crew and parsed_crew > 0 else 1
+                st.session_state["labor_rate"] = 25.0
+                st.session_state["labor_crew"] = min(max(st.session_state.base_crew, 1), 10)
             except Exception as e:
                 st.error(f"Error: {str(e)}")
 
 if st.session_state.result_text:
-    snap = st.session_state.labor_snapshot or {}
     st.markdown("---")
-    st.markdown(st.session_state.result_text)
+    st.markdown(display_text(st.session_state.result_text))
+
+    person_hours = st.session_state.base_hours * st.session_state.base_crew
 
     st.markdown("---")
-    st.markdown("### 💰 Labor Cost Breakdown")
-    st.write(f"**Estimated hours:** {snap.get('hours_needed', hours_needed)}")
-    st.write(f"**People required / available:** {snap.get('crew_size', crew_size)}")
-    st.write(f"**Hourly rate per person:** ${snap.get('hourly_rate', hourly_rate):.2f}")
-    st.write(f"**Total labor cost:** ${snap.get('total_labor', total_labor):,.2f}")
-    st.caption("Materials are not included in this labor total.")
+    st.markdown("### 💰 Labor Cost")
+    st.caption(
+        f"Estimate used {st.session_state.base_crew} person crew for {st.session_state.base_hours:g} hours "
+        f"({person_hours:g} total person-hours). Default rate is $25/hour. "
+        "Change crew or rate below — more people shortens the job hours."
+    )
+
+    lab1, lab2 = st.columns(2)
+    with lab1:
+        hourly_rate = st.number_input(
+            "Hourly rate per person ($)",
+            min_value=0.0,
+            step=1.0,
+            key="labor_rate",
+        )
+    with lab2:
+        crew_size = st.selectbox(
+            "Crew size",
+            [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+            key="labor_crew",
+        )
+
+    hours_needed = round(person_hours / max(int(crew_size), 1), 2)
+    total_labor = hours_needed * int(crew_size) * float(hourly_rate)
+
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Job hours", f"{hours_needed:g}")
+    c2.metric("Crew", f"{int(crew_size)}")
+    c3.metric("Total labor", f"${total_labor:,.2f}")
+
+    snap = st.session_state.project_snapshot
+    contractor_pdf = create_pdf(
+        "Contractor",
+        st.session_state.result_text,
+        st.session_state.pdf_images,
+        snap.get("project_type", ""),
+        snap.get("dimensions", ""),
+        hours_needed,
+        int(crew_size),
+        float(hourly_rate),
+        total_labor,
+    )
+    customer_pdf = create_pdf(
+        "Customer",
+        st.session_state.result_text,
+        st.session_state.pdf_images,
+        snap.get("project_type", ""),
+        snap.get("dimensions", ""),
+        hours_needed,
+        int(crew_size),
+        float(hourly_rate),
+        total_labor,
+    )
 
     stamp = datetime.now().strftime("%Y%m%d_%H%M")
     col_a, col_b = st.columns(2)
     with col_a:
         st.download_button(
             label="📄 Download Contractor Version",
-            data=st.session_state.contractor_pdf,
+            data=contractor_pdf,
             file_name=f"Bid_and_Build_It_Contractor_v{APP_VERSION}_{stamp}.pdf",
             mime="application/pdf",
         )
     with col_b:
         st.download_button(
             label="📄 Download Customer Version",
-            data=st.session_state.customer_pdf,
+            data=customer_pdf,
             file_name=f"Bid_and_Build_It_Customer_v{APP_VERSION}_{stamp}.pdf",
             mime="application/pdf",
         )
